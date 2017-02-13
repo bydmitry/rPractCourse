@@ -1,0 +1,222 @@
+---
+title: "Assignment 2"
+author: "Dmitrii Bychkov / 014059377" 
+output: html_document
+---
+
+#  Cross sectional study
+
+Tehty: `r format(Sys.time()) `
+
+### Instruction
+
+Complete this assignment file and return it and resulting html-file to moodle.
+
+Write as "author:" your name and student number (if you have one)
+
+
+In this assignment we investigate association between HDL (`hdl`) (y-variable) and the following variables:
+
+
+ * Assignment (`age`)
+ * height (`height.cm`)
+ * weight (`weight.kg`)
+ * sex (`gender`)
+ * loaction (`location`)
+ * ratio.ter
+
+
+## Read data
+
+We use [diabetes data](http://biostat.mc.vanderbilt.edu/wiki/pub/Main/DataSets/diabetes.html)
+
+
+```{r}
+
+# Load example diabetes data, this is originally SPSS file
+# Use package "foreign" 
+library(foreign)
+load(file=url("http://biostat.mc.vanderbilt.edu/wiki/pub/Main/DataSets/diabetes.sav"))
+
+# First 2 rows
+head(diabetes,2)
+
+# Simple summaries
+summary(diabetes)
+
+# New variable waist/hip ratio in tertiles
+with(diabetes,table(cut(ratio,quantile(ratio,probs=c(0,1/3,2/3,1),na.rm=TRUE),
+                        include.lowest=TRUE),useNA="ifany"))
+
+diabetes$ratio.ter<-with(diabetes,cut(ratio,quantile(ratio,probs=c(0,1/3,2/3,1),na.rm=TRUE),
+                        include.lowest=TRUE))
+
+```
+
+
+## Variable transformations
+
+Make new variables:
+
+ * `height.cm` height in inches transformed to cm
+ * `weight.kg` pounds into kg
+
+
+```{r}
+
+diabetes$height.cm  <- diabetes$height * 2.54
+diabetes$weight.kg  <- diabetes$weight / 2.2
+
+```
+
+
+## Tabulate
+
+Make tables and output them into html.
+
+
+Take into account if there is any missing values.
+
+
+```{r message=FALSE}
+library(tables)
+```
+
+```{r}
+tmp.tab0  <- tabular( (gender) ~ (1+Heading(Complete)*complete.cases(diabetes))*(hdl)*((n=1)+mean+sd+median),
+        data=diabetes )
+
+
+print(tmp.tab0)
+```
+
+__Since diabetes type II is assosiated with obesity, let's take a look at _weight_ and _waist_; But first we need to pre-process columns:__
+
+```{r}
+diabetes$weight.Q <- with(diabetes, cut(weight.kg, 
+                                breaks=quantile(weight.kg, probs=seq(0,1, by=0.25), na.rm=TRUE), 
+                                include.lowest=TRUE))
+diabetes$waist.Q <- with(diabetes, cut(waist, 
+                                breaks=quantile(waist, probs=seq(0,1, by=0.25), na.rm=TRUE), 
+                                include.lowest=TRUE))
+
+```
+
+__weight:__
+```{r}
+tmp.tab1  <- tabular( (weight.Q) ~ (1+Heading(Complete)*complete.cases(diabetes))*(ratio)*((n=1)+mean+sd+median),
+        data=diabetes)
+print(tmp.tab1)
+```
+
+__waist:__
+```{r}
+tmp.tab2  <- tabular( (waist.Q) ~ (1+Heading(Complete)*complete.cases(diabetes))*(ratio)*((n=1)+mean+sd+median),
+        data=diabetes)
+print(tmp.tab2)
+```
+
+Output html tables.
+
+```{r, results='asis',echo=FALSE}
+html(tmp.tab1)
+html(tmp.tab2)
+```
+
+__So we can see as the weight (and the waist of course) of patient grows the cholesterol/HDL ration increases accordingly. Seems logical.__
+
+## Make graphs
+
+
+Make scatterplots, boxplots, and other types of graphs for description.
+```{r, message=FALSE}
+library(ggplot2)
+library(reshape2)
+library(broom)
+```
+__We need to melt the data first:__
+```{r, error=FALSE, message=FALSE, warning=FALSE}
+melted <- melt(diabetes[(diabetes$ratio < 10 & diabetes$bp.1s < 200), c('id','bp.1s','bp.1d','weight.kg')], 
+               measure.vars = c('bp.1s','bp.1d'), na.rm = TRUE)
+```
+
+__Is there some dependency between blood pressure and patient's weight? __
+```{r, warning=FALSE, message=FALSE}
+ggplot(melted, aes(x=weight.kg, y=value, colour=variable)) +
+  geom_point() + geom_smooth(method = 'lm')
+```
+
+__There is some, but hard to say from the plot how significant it is__
+
+```{r, warning=FALSE, message=FALSE}
+ggplot(na.omit(diabetes), aes(x=location, y=ratio, colour=frame)) +
+  geom_boxplot()
+```
+```{r, warning=FALSE, message=FALSE}
+ggplot(na.omit(diabetes), aes(x=gender, y=hdl)) +
+  geom_boxplot()
+```
+
+## Testing
+
+Test if sex (gender) or location are associated with HDL. 
+
+**NOTE!** These are dichotomic variables
+
+
+## Linear model
+
+Make linear regression models with HDL as response (y) variable. Select the best model and interpret
+results.
+
+Document modeling. Output parameter estimates, p values and confidence intervals of the best model.
+
+
+```{r}
+# Explaining glyhb with weight, make model named tmp.m0
+# NOTE! becasue of missing values "subset=complete.cases(diabetes)""
+tmp.m0  <- glm( hdl ~ gender, data=diabetes,subset=complete.cases(diabetes) )
+#print(tmp.m0)
+summary(tmp.m0)
+```
+
+__1st Model - Gender & Age__
+```{r}
+tmp.m1  <- lm( hdl ~ gender + age, data=diabetes,subset=complete.cases(diabetes) )
+summary(tmp.m1)
+```
+__Comments: Both gender an age are assosiated with HDL levels. Significance is not very strong with p-values just a bit below the 5% threshold. Women expose higher levels of HDL as indicated by a coefficient of 7.9. Age is meant to increase HDL levels by about 22% each year. The two factors together explain only about 7.5% of variance observed in the data, which is quite low.__
+
+__2nd Model - Add weight to the 1st model __
+```{r}
+tmp.m2  <- lm( hdl ~ gender + age + weight + stab.glu, data=diabetes,subset=complete.cases(diabetes) )
+summary(tmp.m2)
+```
+__Comments: Weight appear to be highly significant predictor of HDL levels with effect size of -0.12. Negative means that higher weight is assosiated with lower levels of 'good' cholesterol. Stabilized glucose (stab.glu) is also negatively associated with HDL levels. Second model explains 20% of variance.__
+
+__3rd Model: Introduce interaction term__
+```{r}
+tmp.m3  <- lm( hdl ~ gender + age*weight + stab.glu, data=diabetes,subset=complete.cases(diabetes) )
+summary(tmp.m3)
+```
+__Comments: By assuming interaction between weight and age we improved R-squared up to almost 28 %.__
+
+__Now let's compare the last to models (with and without an interaction term)__
+```{r}
+anova(tmp.m2, tmp.m3, test='Chisq')
+```
+__Anova suggests significant difference in the residuals of the two models. So we should prefer tmp.m3 model as it explainc more variance with the same set of parameters. __
+
+__Resulting model coefficients:__
+```{r}
+tmp.m3$coefficients
+```
+
+__P-values are found from summary() output under Pr(>|t|) for each parameter:__
+```{r}
+summary(tmp.m3)
+```
+__95% Confiddence intervals for each of the coefficients:__
+```{r}
+confint(tmp.m3)
+```
