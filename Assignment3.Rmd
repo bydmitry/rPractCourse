@@ -1,0 +1,159 @@
+---
+title: "Assignment 3"
+author: "Dmitrii Bychkov / 014059377" 
+output: html_document
+---
+
+# Case-control study
+
+Tehty: `r format(Sys.time()) `
+
+### Instruction
+
+1. Complete this assignment file and return it and resulting html-file to moodle. Write as "author:" your name and student number (if you have one)
+2. Write report using e.g. Word or LibreOffice (return in pdf format) with following sections: 
+  + Material and method
+  + Results
+  + Interpretation and discussion 
+  + Conclusion
+3. Upload both two files to moodle
+
+
+## Read data
+
+We use data from a case-control study of (o)esophageal cancer in Ille-et-Vilaine, France.
+
+There is 200 cases, between January 197 and April 1974.
+
+More details page 122.
+
+[Breslow, N. E. and Day, N. E. (1980) Statistical Methods in Cancer Research. Volume 1: The Analysis of Case-Control Studies. IARC Lyon / Oxford University Press.](https://www.iarc.fr/en/publications/pdfs-online/stat/sp32/SP32.pdf)
+
+
+
+```{r message=FALSE}
+library(xtable)
+library(Epi)
+library(epiR)
+
+options(contrasts=c('contr.treatment','contr.treatment'))
+
+```
+
+```{r}
+# Read aggregated data
+#
+data("esoph")
+# Few first lines
+head(esoph,4)
+apu   <- do.call("rbind",
+             sapply(seq(esoph$ncases),
+                           function(x)with(esoph[x,],cbind(rep(agegp,ncases),rep(alcgp,ncases),rep(tobgp,ncases)))))
+apu1  <- do.call("rbind",
+             sapply(seq(esoph$ncontrols),
+                           function(x)with(esoph[x,],cbind(rep(agegp,ncontrols),
+                                                           rep(alcgp,ncontrols),
+                                                           rep(tobgp,ncontrols)))))
+apu2  <- data.frame(cancer=rep(c(1,0),c(nrow(apu),nrow(apu1))),rbind(apu,apu1))
+names(apu2)[2:4]  <- names(esoph)[1:3]
+apu2$agegp  <- factor(apu2$agegp,label=levels(esoph$agegp))
+apu2$alcgp  <- factor(apu2$alcgp,label=levels(esoph$alcgp))
+apu2$tobgp  <- factor(apu2$tobgp,label=levels(esoph$tobgp))
+
+L6.CC.ind  <- apu2
+
+# Heavy alcohol consumption
+L6.CC.ind$heavy  <- Relevel(L6.CC.ind$alcgp,list("0-79g"=1:2,"80+"=3:4))
+
+# Linear effect of alcohol, mid-points of classes
+apu  <- L6.CC.ind$alcgp; levels(apu)  <- c("20","60","100","140")
+L6.CC.ind$alcohol.lin<-as.numeric(as.character(apu))# "jatkuva" muutuja alkoholin k?yt?st?
+
+
+# NOTE! 
+# Change data to individual level
+# Now each line present one individual
+# Same results wityh individual and aggregated data!
+tmp.m1   <- glm(cbind(ncases,ncontrols) ~ factor(as.numeric(alcgp)), data=esoph, family=binomial )
+tmp.m1.A <- glm(cancer ~ alcgp, data=apu2, family=binomial )
+
+ci.exp(tmp.m1)
+ci.exp(tmp.m1.A)
+
+```
+
+## Analysing 2x2 tables.
+
+Analyse effect of tobacco, alcohol consumption, and age using 2x2 tables. Use different cut points.
+
+Comment results briefly.
+
+
+### Tobacco
+We first study effect of tobacco consumption by splitting individuals into two groups: below and above 10 grams per day.
+```{r}
+# Analyses example of 2x2 table, two level tobacco exposure
+# NOTE! ordering of categories.
+# NOTE! "cancer==0"  is FALSE for cancer cases
+with( L6.CC.ind, twoby2(exposure=Relevel(tobgp,list(2:4,1)),outcome=(cancer==0)) )
+```
+We observe that outcome is significantly different between two groups with p-value of 0.0001 and risk ration of 1.65. Now, let's try to compare groups with tobacco consumption below vs above 30 grams per day.
+```{r}
+with( L6.CC.ind, twoby2(exposure=Relevel(tobgp,list(4,1:3)),outcome=(cancer==0)) )
+```
+The groups become very unbalanced, however the observed difference in the risk ratios is still statistically significant with slightly larger effect size as compared to the split above.
+
+### Alkoholi
+Then we can examine the effect of alcohol consumption in the same manner.
+
+```{r}
+with( L6.CC.ind, twoby2(exposure=Relevel(alcgp,list(2:4,1)), outcome=(cancer==0)) )
+```
+The analysis indicated much larger impact of alcohol consumption to the incidence of oesophageal cancer as compared to that of tobacco consumption. Namely, the risk ratio is about 3.6 when dichotomizing by the threshold of 40g/day.
+
+### Age
+Finally, let's check the impact of ageing.
+```{r}
+with( L6.CC.ind, twoby2( exposure=Relevel(agegp,list(4:6,1:3)), outcome=(cancer==0)) )
+```
+We observe that age group is also predictive of esophageal cancer.
+
+
+## Logistic regression
+
+Fit logistic regression models.  Select one (best) model and report results (OR, 95% CI). Document how
+you selected final model. Discuss model selection and results of final briefly.
+
+
+In the first model we include dichotomized tobacco consumption and age group:
+```{r}
+# Example of two logistic regression model
+# Build you own models and test them
+
+tmp.m1  <- glm(cancer ~ agegp + Relevel(tobgp,list(1,2:4)), data=L6.CC.ind, family = 'binomial')
+summary(tmp.m1)
+exp(tmp.m1$coefficients)
+```
+We observe only age group 35-44 years is not significantly associated with cancer onset, however ageing increase chances of esophageal cancer. Low-tobacco-consumption group has 1.8 lower chances of developing cancer as compared to high-tobacco-consumption group after adjusting for age group.
+
+
+In the second model we included all the covariates 
+```{r}
+tmp.m2  <- glm( cancer ~ agegp + Relevel(alcgp,list(1:3,4:6)) + Relevel(tobgp,list(1,2:4)), data=L6.CC.ind, family = 'binomial' )
+summary(tmp.m2)
+exp(tmp.m2$coefficients)
+#ci.exp(tmp.m2,subset=-1)
+```
+Second model suggest the alcohol consumption have bigger impact on developing esophageal cancer than that of smoking (3.6 VS 1.7). We then evluated those two models with ANOVA to confirm that the second model predicts outcome significantly better the model 1.
+
+```{r}
+anova(tmp.m1,tmp.m2,test="Chisq")
+```
+
+
+```{r, results='asis',echo=FALSE}
+print(xtable(ci.exp(tmp.m2,subset=-1),caption="OR from example",digits=3),type="latex")
+```
+
+
+

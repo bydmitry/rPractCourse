@@ -1,0 +1,165 @@
+---
+title: "Assignment 4"
+author: "Dmitrii Bychkov / 014059377" 
+output: html_document
+---
+
+# Cohort Study
+
+Updated: `r format(Sys.time()) `
+
+### Ohje
+
+1. Complete this assignment file  Write as "author:" your name and student number (if you have one)
+1. Upload .Rmd and .html files to moodle
+
+
+## Read data
+
+We use data from prostate cancer study. 
+
+[Description of variables](http://biostat.mc.vanderbilt.edu/wiki/pub/Main/DataSets/Cprostate.html).
+
+Study mortality with following explanatory variables:
+
+ * rx (factor)
+ * stage (factor)
+ * bm (Bone Metastases, 2 classes)
+ * age (make factor or use continuous age)
+ * sz (Size of Primary Tumor (cm^2^), make factor or use continuous size)
+
+
+```{r message=FALSE}
+# Load packages
+library(xtable)
+library(Epi)
+library(foreign)
+library(survival)
+library(epitools)
+
+```
+
+```{r}
+# Read data
+prosdata  <- read.dta(file="http://biostat.mc.vanderbilt.edu/wiki/pub/Main/DataSets/prostate.dta")
+
+# Omit 16 observatiosn with follow-up time 0
+# Use this data in the analyses
+prosdata1  <- prosdata[ prosdata$dtime>0, ]
+summary(prosdata1)
+
+# Add categorical variables to data
+prosdata1$sz.f  <- with( prosdata1, 
+    cut(sz,breaks = c(quantile(prosdata1$sz, probs = seq(0,1,by=0.25), na.rm = TRUE)), include.lowest=TRUE) )
+```
+
+### Mortality tables
+
+Make tables using above mentioned variables. 
+
+Comment briefly.
+
+
+```{r}
+# Person-time scaled to years (originally time is in months)
+# NOTE! 'status!="alive"' means all deaths are accounted ("!=" means not equal)
+pros.PY.rx  <- pyears(Surv(dtime,status!="alive") ~ rx,data=prosdata1,data.frame =TRUE,scale=12)
+pros.PY.rx$data
+cbind(pros.PY.rx$data,with(pros.PY.rx$data,pois.exact(x=event,pt=pyears)))[,-c(3,5,6,10)]
+
+```
+Here we compared event rate or event density rate across 4 different treatments groups and derived confidence intervals for observed rates based on Posson distribution.
+
+### Kaplan-Meier curves
+
+Draw Kaplan-Meier curves for variables in interest.
+
+```{r}
+pros.km.rx<-survfit(Surv(dtime,status!="alive")~rx,data=prosdata1)
+plot(pros.km.rx)
+# NOTE! scale 12 for years, you may changes colors
+plot(pros.km.rx,xlab="Time (years)",ylab="Survival",ylim=c(0,1),mark.time = FALSE,
+     col=c("navy","red2","green","tan"),lwd=2,lty=c(1,2,3,4),xscale=12)
+# NOTE! you may change position of legens and font size (cex)
+legend(50,0.98,legend=names(pros.km.rx$strata),lwd=2,col=c("navy","red2","green","tan"),
+       lty=c(1,2,3,4),bty="n",cex=0.7)
+
+```
+
+
+
+### log-rank test
+
+Use log-rank test. Commetn briefly. 
+
+Log-rank teest evaluates whether survival distribution among groups (in our case it is 4 treatment groups) is different.
+```{r}
+survdiff(Surv(dtime,status!="alive")~rx,data=prosdata1)
+```
+The observed p-value is pretty close to 5% threshold. Hard to make conclusions based just on the log-rank. 
+1.0 mg estrogen group seem to have more favourable oucome on average as compared to other groups.
+
+Let's check the size of tumor:
+```{r}
+pros.km.sz  <- survfit(Surv(dtime,status!="alive")~sz.f,data=prosdata1)
+plot(pros.km.sz,xlab="Time (years)",ylab="Survival",ylim=c(0,1),mark.time = FALSE,
+     col=c("navy","red2","green","tan"),lwd=2,lty=c(1,2,3,4),xscale=12)
+# NOTE! you may change position of legens and font size (cex)
+legend(50,0.98,legend=names(pros.km.sz$strata),lwd=2,col=c("navy","red2","green","tan"),
+       lty=c(1,2,3,4),bty="n",cex=0.7)
+
+```
+```{r}
+survdiff(Surv(dtime,status!="alive")~sz.f,data=prosdata1)
+```
+Stratification of survivors based on the tumor size is also statistically sagnificant in therms of disease outcome.
+
+
+### Cox's proportional hazards model
+
+* Construct Cox's proportional hazards model using above listed variables.
+* Check model assumptions
+* Interpret and comment results briefly
+
+Let's include all the variables without interaction:
+
+```{r}
+pros.cx.m1  <- coxph(Surv(dtime,status!="alive") ~ rx + stage + bm + age + sz, data=prosdata1)
+summary(pros.cx.m1)
+```
+Now we can clearly see that only 1.0 mg estrogen treatment yeilds significant different in survival as compared to the placebo group. We could conclude that this treatment reduces chances for death by 36 % (1-0.64) as compared to placebo. Stage of the disease did not appear as a significant predictor and can be excluded from the analysis. Age increases chances of death by about 2% each year, tumor size - by about 1 % for each cm squared. Expectidly, bone metastases increase risk by 66%. 
+
+NOTE: in the scope of prostate cancer it would be logical to use status == 'dead - prostatic ca' to account only for cancer-related deaths:
+
+```{r}
+pros.cx.m2  <- coxph(Surv(dtime,status=="dead - prostatic ca") ~ rx + stage + bm + age + sz, data=prosdata1)
+summary(pros.cx.m2)
+```
+Now, this model chanfes the picture. Stage becomes a significant predictor and treatment with high dose of estrogen appears to be as efficient as 1.0 mg. Age is not significnt any more, probably because we excluded other couses of death such as cardiovasular complications etc.
+
+Forgot to check if PH assumption holds:
+```{r}
+cox.zph(pros.cx.m2)
+```
+The global ChiSquared p-value is large which means that the PH assumption holds! However, individual stage statistics looks too large so we might consider either stratification by stage or excluding it from the model.
+
+### Poisson regression model
+
+
+* Construct Poisson regression model using above listed variables.
+* Interpret and comment results briefly
+  + Especially check if interpretation of variable `rx` changes when other covariates are added
+  + Use pairwise comparisons
+
+
+```{r}
+pros.poi.m1  <- glm(ifelse(status!="alive",1,0)~rx + stage + bm + age + sz ,data=prosdata1)
+summary(pros.poi.m1)
+
+ci.exp(pros.poi.m1,subset=-1)
+# Pair-wise differences
+ci.exp(pros.poi.m1,subset="rx",diff=TRUE)
+
+```
+It looks that we could draw similar conclusions from the Poisson model, except that the effect size of statistically significant covariates differs from that of a Cox PH model. 
+
